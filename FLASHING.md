@@ -48,10 +48,14 @@ so **flash OrangeFox first**; TWRP is there to experiment with.
 
 `<kernel>` is the workflow's `kernel_variant` input:
 
-- `garden` — the tree's own prebuilt `Image.gz`/dtb/dtbo (default, try this first).
+- `garden` — the tree's own prebuilt `Image.gz`/dtb/dtbo (try this first).
 - `cattail` — kernel/dtb/dtbo dumped from retail firmware instead. Use it if the
   `garden` image flashes but the screen stays black or the phone boots straight
   back to the system.
+
+The workflow defaults to `kernel_variant: both`, which builds the `garden` and
+the `cattail` image in the same run, so you should have both files in hand
+before you flash anything.
 
 Artifacts downloaded from a workflow run arrive as a **`.zip`** (the `.img` is
 inside it) and expire after 30 days. A run dispatched with a `release_tag`
@@ -213,8 +217,10 @@ a working custom recovery by flashing the file to the recovery partition.
    [section 7](#7-first-boot-in-recovery) for `/data` handling.
 
 **If the display stays black, or the phone boots straight to MIUI:** the kernel
-does not match your unit. Re-run the workflow with `kernel_variant: cattail`,
-download that image and repeat steps 1–5. If it still will not boot, see
+does not match your unit. Use the `cattailkernel` image from the same run
+(`OrangeFox-R12.0-Beta-garden-cattailkernel-<date>.img`, from the artifact named
+`orangefox-cattail-fox_<branch>-cattail-kernel`) and repeat steps 1–5 — no
+rebuild needed. If it still will not boot, see
 [section 8](#8-troubleshooting-a-flash-that-does-not-work).
 
 ---

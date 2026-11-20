@@ -10,11 +10,15 @@ name: Build recovery (Redmi 9 India / cattail)
 # Secondary job: TWRP, off by default. Enable it with "build_twrp_experimental"
 # when you want to try a plain TWRP build from the same tree.
 #
-# Manual trigger only. Pick the branch and kernel variant, run it, then
-# download the .img from the run's Artifacts section, or set "release_tag" to
-# publish the images to a GitHub release instead (which does not expire).
+# Manual trigger only. Pick the branch, run it, then download the .img files
+# from the run's Artifacts section, or set "release_tag" to publish them to a
+# GitHub release instead (which does not expire).
 #
-# Outputs:
+# Both build jobs are a matrix over the kernel variant, so the default run
+# produces the "garden" and the "cattail" kernel image side by side and you can
+# try both without waiting for a second build.
+#
+# Outputs (one of each per kernel leg):
 #   OrangeFox-<version>-garden-<kernel>kernel-<date>.img    (job: orangefox)
 #   TWRP-<branch>-cattail-<kernel>-kernel-<date>.img        (job: twrp)
 
@@ -30,11 +34,12 @@ on:
           - "12.1"
           - "14.1"
       kernel_variant:
-        description: "Kernel to use (garden = tree default, cattail = stock dump)"
+        description: "Kernels to build: both (default) = one leg per kernel, garden = tree default, cattail = stock dump"
         required: true
-        default: "garden"
+        default: "both"
         type: choice
         options:
+          - both
           - garden
           - cattail
       build_twrp_experimental:
@@ -88,10 +93,17 @@ jobs:
           scripts/selftest.sh
 
   orangefox:
-    name: Build OrangeFox for cattail (primary)
+    name: Build OrangeFox for cattail -- ${{ matrix.kernel_variant }} kernel (primary)
     needs: selftest
     runs-on: ubuntu-22.04
     timeout-minutes: 350
+    strategy:
+      # One leg per kernel. The default input "both" expands to garden and
+      # cattail, which run in parallel on separate runners; fail-fast is off so
+      # a broken kernel leg never throws away the other image.
+      fail-fast: false
+      matrix:
+        kernel_variant: ${{ inputs.kernel_variant == 'both' && fromJSON('["garden", "cattail"]') || fromJSON(format('["{0}"]', inputs.kernel_variant)) }}
 
     steps:
       - name: Checkout this repo
@@ -197,7 +209,7 @@ jobs:
       - name: Build OrangeFox image
         env:
           FOX_BRANCH: ${{ inputs.fox_branch }}
-          KERNEL_VARIANT: ${{ inputs.kernel_variant }}
+          KERNEL_VARIANT: ${{ matrix.kernel_variant }}
           SRC_DIR: ${{ github.workspace }}/fox
           ARTIFACT_DIR: ${{ github.workspace }}/artifacts
           SYNC_TOOLS_DIR: ${{ github.workspace }}/fox_sync
@@ -211,7 +223,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: orangefox-build-log-failure
+          name: orangefox-build-log-failure-${{ matrix.kernel_variant }}
           path: |
             build.log
             fox/out/error.log
@@ -222,18 +234,23 @@ jobs:
       - name: Upload OrangeFox image
         uses: actions/upload-artifact@v4
         with:
-          name: orangefox-cattail-fox_${{ inputs.fox_branch }}-${{ inputs.kernel_variant }}-kernel
+          name: orangefox-cattail-fox_${{ inputs.fox_branch }}-${{ matrix.kernel_variant }}-kernel
           path: artifacts/*.img
           if-no-files-found: error
           retention-days: 30
 
   twrp:
-    name: Build experimental TWRP for cattail
+    name: Build experimental TWRP for cattail -- ${{ matrix.kernel_variant }} kernel
     # Opt-in only: the OrangeFox image above is the primary build.
     needs: selftest
     if: ${{ inputs.build_twrp_experimental }}
     runs-on: ubuntu-22.04
     timeout-minutes: 350
+    strategy:
+      # Same kernel matrix as the OrangeFox job, for the same reason.
+      fail-fast: false
+      matrix:
+        kernel_variant: ${{ inputs.kernel_variant == 'both' && fromJSON('["garden", "cattail"]') || fromJSON(format('["{0}"]', inputs.kernel_variant)) }}
 
     steps:
       - name: Checkout this repo
@@ -305,7 +322,7 @@ jobs:
       - name: Build recovery image
         env:
           MANIFEST_BRANCH: ${{ inputs.manifest_branch }}
-          KERNEL_VARIANT: ${{ inputs.kernel_variant }}
+          KERNEL_VARIANT: ${{ matrix.kernel_variant }}
           BUILD_TARGET: ${{ inputs.build_target }}
           SRC_DIR: ${{ github.workspace }}/twrp
           ARTIFACT_DIR: ${{ github.workspace }}/artifacts
@@ -319,7 +336,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: twrp-build-log-failure
+          name: twrp-build-log-failure-${{ matrix.kernel_variant }}
           path: |
             build.log
             twrp/out/error.log
@@ -330,19 +347,20 @@ jobs:
       - name: Upload recovery image
         uses: actions/upload-artifact@v4
         with:
-          name: twrp-cattail-${{ inputs.manifest_branch }}-${{ inputs.kernel_variant }}-kernel
+          name: twrp-cattail-${{ inputs.manifest_branch }}-${{ matrix.kernel_variant }}-kernel
           path: artifacts/*.img
           if-no-files-found: error
           retention-days: 30
 
   release:
     name: Publish images as a GitHub release
-    # Optional exit path: only with a release_tag, and only once the primary
-    # build has succeeded. Runs even when the TWRP job was skipped (input off)
-    # or failed, so a good OrangeFox image is never held back by the
-    # experimental one.
+    # Optional exit path: only with a release_tag, once every build job has
+    # finished. It attaches whatever the run produced -- per kernel leg, so a
+    # run where one kernel failed still publishes the image that did build, and
+    # a skipped TWRP job is irrelevant. The step below refuses to publish an
+    # empty release, so a total failure fails here instead of shipping nothing.
     needs: [orangefox, twrp]
-    if: ${{ !cancelled() && inputs.release_tag != '' && needs.orangefox.result == 'success' }}
+    if: ${{ !cancelled() && inputs.release_tag != '' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
@@ -395,7 +413,7 @@ jobs:
             Redmi 9 Activ -- `cattail`, `M2006C3MII`, MediaTek MT6765.
 
             - OrangeFox base: `${{ inputs.fox_branch }}`
-            - Kernel variant: `${{ inputs.kernel_variant }}`
+            - Kernel variants built: `${{ inputs.kernel_variant }}`
             - Experimental TWRP job: `${{ inputs.build_twrp_experimental }}`
 
             `SHA256SUMS.txt` lists the image digests -- verify with

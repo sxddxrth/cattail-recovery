@@ -30,31 +30,36 @@ The workflow (`.github/workflows/build-twrp.yml`, display name
 | Job | Base | Runs | Output |
 | --- | --- | --- | --- |
 | `selftest` | stubs only — no sources or toolchain | Always, first; gates the two build jobs | Self-test report in the log |
-| `orangefox` — **primary** | OrangeFox, sync branch 12.1 (or 14.1) | Always, after `selftest` | `OrangeFox-<version>-garden-<kernel>kernel-<date>.img` |
-| `twrp` — **experimental** | TWRP minimal manifest, `twrp-11` | Only if `build_twrp_experimental` is ticked, and only after `selftest` | `TWRP-<branch>-cattail-<kernel>kernel-<date>.img` |
-| `release` | — | Only when `release_tag` is set and `orangefox` succeeded | A GitHub release with every `.img` this run produced |
+| `orangefox` — **primary** | OrangeFox, sync branch 12.1 (or 14.1) | Always, after `selftest`; one matrix leg per kernel | `OrangeFox-<version>-garden-<kernel>kernel-<date>.img`, one per kernel leg |
+| `twrp` — **experimental** | TWRP minimal manifest, `twrp-11` | Only if `build_twrp_experimental` is ticked, and only after `selftest`; one matrix leg per kernel | `TWRP-<branch>-cattail-<kernel>kernel-<date>.img`, one per kernel leg |
+| `release` | — | Only when `release_tag` is set; attaches whatever the run produced | A GitHub release with every `.img` this run produced |
 
 OrangeFox is the primary target because the vendored tree was written for it —
 it ships the touch firmware and the TEE/gatekeeper blobs, so it is the image
 most likely to boot with working touch. TWRP builds from the same tree with a
 different recovery base and is there to experiment with.
 
-Both jobs run in parallel on separate runners, so a single run can hand you
-both images.
+Each build job is a matrix over the kernel variant, so one run hands you the
+`garden` kernel image and the `cattail` kernel image together — for OrangeFox,
+and for TWRP too when it is enabled. The legs run in parallel on separate
+runners, and `fail-fast` is off, so one kernel failing still uploads the other
+image.
 
 ### Workflow inputs
 
 | Input | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `fox_branch` | choice `12.1` / `14.1` | `12.1` | OrangeFox sync branch. `12.1` is the closest to this Android 10 device; upstream dropped 11.0. `14.1` also switches the job to JDK 17. |
-| `kernel_variant` | choice `garden` / `cattail` | `garden` | `garden` = the tree's prebuilt `Image.gz` + dtb + dtbo. `cattail` = kernel/dtb/dtbo dumped from retail firmware, with `BOARD_KERNEL_IMAGE_NAME := Image`. |
+| `kernel_variant` | choice `both` / `garden` / `cattail` | `both` | What each build job's matrix builds: `garden` = the tree's prebuilt `Image.gz` + dtb + dtbo, `cattail` = kernel/dtb/dtbo dumped from retail firmware (with `BOARD_KERNEL_IMAGE_NAME := Image`), `both` = one leg per kernel so a single run produces both images. |
 | `build_twrp_experimental` | boolean | `false` | Build the TWRP job too. |
 | `manifest_branch` | string | `twrp-11` | TWRP manifest branch (ignored unless the TWRP job runs). |
 | `build_target` | choice `recovery` / `boot` | `recovery` | TWRP partition to build (ignored unless the TWRP job runs). |
 | `release_tag` | string | *(empty)* | Optional. When set, the run publishes a GitHub release with this tag and attaches the images, so they outlive the 30-day artifact retention. The release is created at the dispatched commit if the tag does not exist yet; only letters, digits, `.`, `_` and `-` are allowed. |
 
-Try `kernel_variant: garden` first. If the image flashes but the phone shows a
-black screen or boots straight back to MIUI, rebuild with `cattail`.
+With the default `both` there is nothing to guess: flash the `gardenkernel`
+image first, and if the phone shows a black screen or boots straight back to
+MIUI after flashing, try the `cattailkernel` image from the same run instead of
+waiting for another build.
 
 ---
 
@@ -64,8 +69,10 @@ black screen or boots straight back to MIUI, rebuild with `cattail`.
 2. Open the **Actions** tab → *Build recovery (Redmi 9 India / cattail)* →
    **Run workflow**.
 3. Pick the branch, leave the defaults, press **Run workflow**.
-4. When the run finishes (roughly 1–3 hours), open it and download
-   `orangefox-cattail-fox_12.1-garden-kernel` from **Artifacts**.
+4. When the run finishes, open it and take the images from **Artifacts**:
+   `orangefox-cattail-fox_12.1-garden-kernel` and
+   `orangefox-cattail-fox_12.1-cattail-kernel`. Each leg takes roughly 1–3
+   hours, but they run in parallel, so the wall clock is not doubled.
 
 To keep the images past the 30-day artifact retention, set `release_tag` when
 dispatching (for example `cattail-2026.11`). Once the primary build has
