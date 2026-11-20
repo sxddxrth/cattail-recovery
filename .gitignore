@@ -1,0 +1,12 @@
+# Local build output -- never commit the synced AOSP tree or the images
+/twrp/
+/fox/
+/fox_sync/
+/artifacts/
+build.log
+twrp/out/
+fox/out/
+
+# Editor / OS noise
+.DS_Store
+*.swp

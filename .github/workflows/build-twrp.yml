@@ -1,0 +1,406 @@
+name: Build recovery (Redmi 9 India / cattail)
+
+# Builds an unofficial recovery image for the Xiaomi Redmi 9 (India) /
+# Redmi 9 Activ, codename "cattail", model M2006C3MII (MediaTek MT6765G).
+#
+# Primary job: OrangeFox, built from the unified MT6765 "garden" device tree.
+# That tree is the one known-good layout for this hardware, so OrangeFox is
+# the image to flash first.
+#
+# Secondary job: TWRP, off by default. Enable it with "build_twrp_experimental"
+# when you want to try a plain TWRP build from the same tree.
+#
+# Manual trigger only. Pick the branch and kernel variant, run it, then
+# download the .img from the run's Artifacts section, or set "release_tag" to
+# publish the images to a GitHub release instead (which does not expire).
+#
+# Outputs:
+#   OrangeFox-<version>-garden-<kernel>kernel-<date>.img    (job: orangefox)
+#   TWRP-<branch>-cattail-<kernel>-kernel-<date>.img        (job: twrp)
+
+on:
+  workflow_dispatch:
+    inputs:
+      fox_branch:
+        description: "OrangeFox sync branch (12.1 is the closest to this Android 10 device; 14.1 uses JDK 17)"
+        required: true
+        default: "12.1"
+        type: choice
+        options:
+          - "12.1"
+          - "14.1"
+      kernel_variant:
+        description: "Kernel to use (garden = tree default, cattail = stock dump)"
+        required: true
+        default: "garden"
+        type: choice
+        options:
+          - garden
+          - cattail
+      build_twrp_experimental:
+        description: "Also build the experimental TWRP image (opt-in)"
+        required: true
+        default: false
+        type: boolean
+      manifest_branch:
+        description: "TWRP minimal manifest branch (experimental job only)"
+        required: false
+        default: "twrp-11"
+        type: string
+      build_target:
+        description: "TWRP partition to build (experimental job only)"
+        required: false
+        default: "recovery"
+        type: choice
+        options:
+          - recovery
+          - boot
+      release_tag:
+        description: "Optional: publish the images as a GitHub release with this tag (letters, digits, . _ -)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recovery-cattail-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    name: Validate build scripts
+    # No sources, no toolchain, no network: drives both build scripts against
+    # stubs, so a broken flag, guard or env var fails in seconds instead of
+    # after the multi-GB syncs below. This job gates the two build jobs.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Run build-script self test
+        run: |
+          set -euo pipefail
+          chmod +x scripts/selftest.sh
+          scripts/selftest.sh
+
+  orangefox:
+    name: Build OrangeFox for cattail (primary)
+    needs: selftest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Validate device tree
+        # Cheap preflight (well under a second): catches a renamed or broken
+        # tree, a product-name mismatch, a wrong install path or a missing
+        # prebuilt blob before the multi-GB sync and the compile.
+        run: |
+          set -euo pipefail
+          chmod +x scripts/check-device-tree.sh
+          scripts/check-device-tree.sh
+
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          echo "Before:"
+          df -h /
+          # The fox_12.1 tree needs ~45 GB; a stock runner has ~14 GB.
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile /swapfile || true
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /usr/share/swift \
+            /opt/ghc \
+            /opt/az \
+            /opt/microsoft \
+            /opt/google/chrome \
+            /opt/hostedtoolcache/CodeQL \
+            "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "After:"
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex git gnupg gperf \
+            imagemagick jq liblz4-tool libncurses-dev libsdl1.2-dev \
+            libssl-dev libxml2 libxml2-utils lzop openjdk-11-jdk pngcrush \
+            python3 rsync schedtool squashfs-tools unzip xattr xsltproc \
+            zip zlib1g-dev
+          sudo apt-get install -y --no-install-recommends \
+            g++-multilib gcc-multilib lib32ncurses-dev lib32readline-dev \
+            lib32stdc++6 lib32z1-dev \
+            || echo "::warning::Some 32-bit packages were unavailable; continuing."
+
+      - name: Select JDK for the OrangeFox branch
+        # fox_14.1 tracks Android 14, whose build system rejects JDK 11. The
+        # dependency step above installs JDK 11, which is what fox_12.1 needs.
+        if: ${{ inputs.fox_branch == '14.1' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends openjdk-17-jdk-headless
+          shopt -s nullglob
+          candidates=(/usr/lib/jvm/java-17-openjdk-*)
+          shopt -u nullglob
+          if [ "${#candidates[@]}" -eq 0 ]; then
+            echo "::error::openjdk-17 installed but no /usr/lib/jvm/java-17-openjdk-* directory was found"
+            exit 1
+          fi
+          JAVA_HOME="${candidates[0]}"
+          if [ ! -x "$JAVA_HOME/bin/javac" ]; then
+            echo "::error::no javac in $JAVA_HOME/bin"
+            exit 1
+          fi
+          # JAVA_HOME and PATH are what soong reads; the alternatives switch
+          # keeps any tool that calls plain "java" on the same JDK.
+          sudo update-alternatives --set java "$JAVA_HOME/bin/java" || true
+          sudo update-alternatives --set javac "$JAVA_HOME/bin/javac" || true
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME/bin/java" -version
+          "$JAVA_HOME/bin/javac" -version
+
+      - name: Configure git and repo
+        run: |
+          set -euo pipefail
+          git config --global user.name "Recovery CI"
+          git config --global user.email "recovery-ci@users.noreply.github.com"
+          git config --global color.ui false
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/repo" --version
+
+      - name: Enable ccache
+        run: |
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_EXEC=$(command -v ccache)" >> "$GITHUB_ENV"
+          ccache -M 5G
+          df -h /
+
+      - name: Build OrangeFox image
+        env:
+          FOX_BRANCH: ${{ inputs.fox_branch }}
+          KERNEL_VARIANT: ${{ inputs.kernel_variant }}
+          SRC_DIR: ${{ github.workspace }}/fox
+          ARTIFACT_DIR: ${{ github.workspace }}/artifacts
+          SYNC_TOOLS_DIR: ${{ github.workspace }}/fox_sync
+          JOBS: 4
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build-orangefox.sh
+          scripts/build-orangefox.sh 2>&1 | tee build.log
+
+      - name: Collect build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orangefox-build-log-failure
+          path: |
+            build.log
+            fox/out/error.log
+            fox/out/verbose.log.gz
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload OrangeFox image
+        uses: actions/upload-artifact@v4
+        with:
+          name: orangefox-cattail-fox_${{ inputs.fox_branch }}-${{ inputs.kernel_variant }}-kernel
+          path: artifacts/*.img
+          if-no-files-found: error
+          retention-days: 30
+
+  twrp:
+    name: Build experimental TWRP for cattail
+    # Opt-in only: the OrangeFox image above is the primary build.
+    needs: selftest
+    if: ${{ inputs.build_twrp_experimental }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Validate device tree
+        # Cheap preflight (well under a second): catches a renamed or broken
+        # tree, a product-name mismatch, a wrong install path or a missing
+        # prebuilt blob before the multi-GB sync and the compile.
+        run: |
+          set -euo pipefail
+          chmod +x scripts/check-device-tree.sh
+          scripts/check-device-tree.sh
+
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          echo "Before:"
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "After:"
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # Core toolchain: if any of these fail, the build cannot run.
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex git gnupg gperf \
+            imagemagick jq liblz4-tool libncurses-dev libsdl1.2-dev \
+            libssl-dev libxml2 libxml2-utils lzop openjdk-11-jdk pngcrush \
+            python3 rsync schedtool squashfs-tools unzip xattr xsltproc \
+            zip zlib1g-dev
+          # 32-bit runtime bits used by the MT6765 prebuilt blobs.
+          sudo apt-get install -y --no-install-recommends \
+            g++-multilib gcc-multilib lib32ncurses-dev lib32readline-dev \
+            lib32stdc++6 lib32z1-dev \
+            || echo "::warning::Some 32-bit packages were unavailable; continuing."
+
+      - name: Configure git and repo
+        run: |
+          set -euo pipefail
+          git config --global user.name "Recovery CI"
+          git config --global user.email "recovery-ci@users.noreply.github.com"
+          git config --global color.ui false
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/repo" --version
+
+      - name: Enable ccache
+        run: |
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_EXEC=$(command -v ccache)" >> "$GITHUB_ENV"
+          ccache -M 5G
+          df -h /
+
+      - name: Build recovery image
+        env:
+          MANIFEST_BRANCH: ${{ inputs.manifest_branch }}
+          KERNEL_VARIANT: ${{ inputs.kernel_variant }}
+          BUILD_TARGET: ${{ inputs.build_target }}
+          SRC_DIR: ${{ github.workspace }}/twrp
+          ARTIFACT_DIR: ${{ github.workspace }}/artifacts
+          JOBS: 4
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build-twrp.sh
+          scripts/build-twrp.sh 2>&1 | tee build.log
+
+      - name: Collect build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twrp-build-log-failure
+          path: |
+            build.log
+            twrp/out/error.log
+            twrp/out/verbose.log.gz
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload recovery image
+        uses: actions/upload-artifact@v4
+        with:
+          name: twrp-cattail-${{ inputs.manifest_branch }}-${{ inputs.kernel_variant }}-kernel
+          path: artifacts/*.img
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish images as a GitHub release
+    # Optional exit path: only with a release_tag, and only once the primary
+    # build has succeeded. Runs even when the TWRP job was skipped (input off)
+    # or failed, so a good OrangeFox image is never held back by the
+    # experimental one.
+    needs: [orangefox, twrp]
+    if: ${{ !cancelled() && inputs.release_tag != '' && needs.orangefox.result == 'success' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Validate the release tag
+        env:
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$TAG" | grep -qE '^[A-Za-z0-9._-]+$'; then
+            echo "::error::release_tag '$TAG' may only contain letters, digits, '.', '_' and '-'"
+            exit 1
+          fi
+          echo "release tag: $TAG"
+
+      - name: Download the images from this run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-kernel"
+          path: images
+          merge-multiple: true
+
+      - name: Check the images and write checksums
+        run: |
+          set -euo pipefail
+          ls -l images
+          if ! compgen -G 'images/*.img' >/dev/null; then
+            echo "::error::the build succeeded but no .img file was downloaded"
+            exit 1
+          fi
+          # Ship the digests with the release so a download can be checked
+          # without digging the sha256 out of the run log.
+          cd images
+          sha256sum ./*.img > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_tag }}
+          files: |
+            images/*.img
+            images/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          body: |
+            Unofficial recovery images for the Xiaomi Redmi 9 (India) /
+            Redmi 9 Activ -- `cattail`, `M2006C3MII`, MediaTek MT6765.
+
+            - OrangeFox base: `${{ inputs.fox_branch }}`
+            - Kernel variant: `${{ inputs.kernel_variant }}`
+            - Experimental TWRP job: `${{ inputs.build_twrp_experimental }}`
+
+            `SHA256SUMS.txt` lists the image digests -- verify with
+            `sha256sum -c SHA256SUMS.txt`.
+
+            Nothing here has been tested on hardware. Read the flashing and
+            unbrick guide before flashing:
+            https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/FLASHING.md
