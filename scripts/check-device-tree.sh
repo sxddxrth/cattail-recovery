@@ -139,6 +139,16 @@ if [ -s "$TREE_DIR/vendorsetup.sh" ]; then
 fi
 
 # ------------------------------------------------------------------- prebuilts
+# The tree was written for OrangeFox 11.0 and used to pin FOX_VERSION here. The
+# 12.1 sources reject that variable outright ("'FOX_VERSION' is obsolete"),
+# failing ckati before anything is compiled, so catch it here instead.
+log "Checking OrangeFox variables"
+if grep -qE '^[[:space:]]*export[[:space:]]+FOX_VERSION=' "$TREE_DIR/vendorsetup.sh"; then
+	bad "vendorsetup.sh exports FOX_VERSION, which OrangeFox 12.1 rejects as obsolete"
+else
+	ok "vendorsetup.sh does not export the obsolete FOX_VERSION"
+fi
+
 log "Checking kernel and prebuilt blobs"
 if [ -s "$TREE_DIR/BoardConfig.mk" ]; then
 	kern="$(getvar "$TREE_DIR/BoardConfig.mk" TARGET_PREBUILT_KERNEL)"

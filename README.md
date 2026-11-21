@@ -194,7 +194,7 @@ why it covers `cattail`. It provides:
   `0x11a88000`, tags `0x07808000`, 2048-byte pages, header v2, 64 MB
   boot/recovery, `TW_INCLUDE_CRYPTO_FBE := true`, `TW_THEME := portrait_hdpi`.
 - `vendorsetup.sh` — OrangeFox configuration: recovery/system/vendor/boot paths,
-  `OF_USE_MAGISKBOOT`, AVB 2.0 patching, `FOX_VERSION="R11.1_1"`, screen
+  `OF_USE_MAGISKBOOT`, AVB 2.0 patching, screen
   geometry, alternate codenames.
 - `twrp_garden.mk` / `AndroidProducts.mk` / `device.mk` — the `twrp_garden`
   product, which is also what OrangeFox expects to lunch.
