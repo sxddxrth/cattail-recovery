@@ -124,11 +124,19 @@ export TZ=UTC
 # relax nounset while it and lunch() run, then restore it so OUR unset-variable
 # mistakes still fail loudly.
 export TOP="$(pwd)"
-set +u
+set +eu
 # shellcheck disable=SC1091
 . build/envsetup.sh
+envsetup_rc=$?
 lunch "${PRODUCT}-eng"
-set -u
+lunch_rc=$?
+set -eu
+log "envsetup.sh exit $envsetup_rc, lunch exit $lunch_rc, TARGET_PRODUCT=${TARGET_PRODUCT:-<unset>}"
+# A non-zero return from either is not automatically fatal (AOSP's envsetup.sh
+# regularly ends on a false test), but lunch must actually have selected our
+# product, or mka would build the wrong target -- or nothing.
+[ "${TARGET_PRODUCT:-}" = "$PRODUCT" ] \
+	|| die "lunch ${PRODUCT}-eng did not take effect (TARGET_PRODUCT=${TARGET_PRODUCT:-<unset>}, envsetup exit $envsetup_rc, lunch exit $lunch_rc)"
 mka "${BUILD_TARGET}image" -j"$JOBS"
 
 # --------------------------------------------------------------------- collect

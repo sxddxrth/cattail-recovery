@@ -66,6 +66,21 @@ expect_ok() {
 	fi
 }
 
+# expect_status_fail <name> <command...>
+# For a command that is supposed to die silently: any non-zero exit passes, and
+# an output match is not required (there is no output to match).
+expect_status_fail() {
+	local name="$1"
+	shift
+	local rc=0
+	"$@" >/dev/null 2>&1 || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		ok "$name (exit $rc)"
+	else
+		bad "$name: expected a non-zero exit, got 0"
+	fi
+}
+
 # expect_file <name> <glob>
 expect_file() {
 	local name="$1" pattern="$2"
@@ -142,13 +157,21 @@ mkdir -p "$stubbin"
 # must export TOP and lift `set -u` while sourcing this.
 cat > "$TMP/hostile-envsetup.sh" <<'STUB'
 TOP_CHECK="${TOP:?envsetup.sh needs TOP}"
-lunch() { echo "stub lunch: $*"; }
+lunch() { export TARGET_PRODUCT="${1%-*}"; echo "stub lunch: $*"; }
+# AOSP's envsetup.sh ends on constructs that return non-zero. Under `set -e`
+# that silently aborts the caller -- no message, no build (what the second CI
+# run hit), so the build scripts must source it with -e off.
+[ -n "" ]
 STUB
 
 # The stub only tests anything if it really breaks without a TOP.
 expect_fail "hostile envsetup.sh rejects a missing TOP" \
 	"envsetup.sh needs TOP" \
 	bash -c 'set -euo pipefail; . "$1"' _ "$TMP/hostile-envsetup.sh"
+# ...and that it really does die silently under `set -e`, so removing the
+# `set +e` in the build scripts cannot slip through untested.
+expect_status_fail "hostile envsetup.sh aborts a set -e caller" \
+	bash -c 'set -eu; TOP=x . "$1"' _ "$TMP/hostile-envsetup.sh"
 
 # Fake repo launcher: init creates .repo, sync copies in the hostile
 # build/envsetup.sh above. Nothing is downloaded.
