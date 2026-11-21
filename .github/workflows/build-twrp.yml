@@ -232,10 +232,14 @@ jobs:
           retention-days: 7
 
       - name: Upload OrangeFox image
+        # The .img and its build manifest travel together; the manifest records
+        # the kernel, branch, commit and digest of that image.
         uses: actions/upload-artifact@v4
         with:
           name: orangefox-cattail-fox_${{ inputs.fox_branch }}-${{ matrix.kernel_variant }}-kernel
-          path: artifacts/*.img
+          path: |
+            artifacts/*.img
+            artifacts/*-manifest.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -348,7 +352,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: twrp-cattail-${{ inputs.manifest_branch }}-${{ matrix.kernel_variant }}-kernel
-          path: artifacts/*.img
+          path: |
+            artifacts/*.img
+            artifacts/*-manifest.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -396,7 +402,7 @@ jobs:
           # Ship the digests with the release so a download can be checked
           # without digging the sha256 out of the run log.
           cd images
-          sha256sum ./*.img > SHA256SUMS.txt
+          sha256sum ./*.img ./*-manifest.txt > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create or update the release
@@ -406,6 +412,7 @@ jobs:
           name: ${{ inputs.release_tag }}
           files: |
             images/*.img
+            images/*-manifest.txt
             images/SHA256SUMS.txt
           fail_on_unmatched_files: true
           body: |
@@ -416,8 +423,9 @@ jobs:
             - Kernel variants built: `${{ inputs.kernel_variant }}`
             - Experimental TWRP job: `${{ inputs.build_twrp_experimental }}`
 
-            `SHA256SUMS.txt` lists the image digests -- verify with
-            `sha256sum -c SHA256SUMS.txt`.
+            Each image ships with a `-manifest.txt` recording the kernel,
+            branch, commit and digest it was built from. `SHA256SUMS.txt` lists
+            the digests -- verify with `sha256sum -c SHA256SUMS.txt`.
 
             Nothing here has been tested on hardware. Read the flashing and
             unbrick guide before flashing:

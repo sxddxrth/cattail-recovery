@@ -74,6 +74,11 @@ waiting for another build.
    `orangefox-cattail-fox_12.1-cattail-kernel`. Each leg takes roughly 1–3
    hours, but they run in parallel, so the wall clock is not doubled.
 
+   Every artifact also contains `<image>-manifest.txt`: a small `key=value`
+   record of the kernel variant, branch, commit, run and `image_sha256` behind
+   that `.img`. Keep it with the image and months later you can still tell what
+   you flashed and where it came from.
+
 To keep the images past the 30-day artifact retention, set `release_tag` when
 dispatching (for example `cattail-2026.11`). Once the primary build has
 succeeded, the `release` job creates that tag at the dispatched commit, makes a
@@ -82,7 +87,9 @@ too when it was requested and built. A tag that already exists is reused and the
 assets are replaced. The tag may only contain letters, digits, `.`, `_` and `-`;
 an invalid one fails fast in a step that never touches the build. Each release
 also carries `SHA256SUMS.txt`, so a download can be verified with
-`sha256sum -c SHA256SUMS.txt` without looking anything up in the run log.
+`sha256sum -c SHA256SUMS.txt` without looking anything up in the run log,
+plus the `-manifest.txt` file for each image. Manifest names carry the image
+name, so two kernel legs never overwrite each other's manifest.
 
 Artifacts are zips containing the `.img` and are kept for 30 days; each run's
 log prints the image `sha256:` so you can verify your download. On failure the

@@ -133,8 +133,39 @@ STAMP="$(date -u +%Y%m%d)"
 DEST="$ARTIFACT_DIR/TWRP-${MANIFEST_BRANCH}-${DEVICE}-${KERNEL_VARIANT}-kernel-${STAMP}.img"
 cp "$IMG" "$DEST"
 
+# ------------------------------------------------------------------- manifest
+# A key=value file that travels with the image, so a downloaded .img can still
+# be traced to the kernel, branch, commit and digest it was built from.
+MANIFEST="${DEST%.img}-manifest.txt"
+COMMIT="${GITHUB_SHA:-}"
+[ -n "$COMMIT" ] \
+	|| COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+RUN_URL="${GITHUB_RUN_ID:+https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}}"
+IMAGE_SHA="$(sha256sum "$DEST" | cut -d' ' -f1)"
+{
+	printf '# Recovery build manifest for cattail -- keep this file with the image.\n'
+	printf '# image_sha256 must match the .img; recompute it with sha256sum.\n'
+	printf 'device=cattail\n'
+	printf 'model=M2006C3MII\n'
+	printf 'tree=garden\n'
+	printf 'recovery=twrp\n'
+	printf 'manifest_branch=%s\n' "$MANIFEST_BRANCH"
+	printf 'build_target=%s\n' "$BUILD_TARGET"
+	printf 'kernel_variant=%s\n' "$KERNEL_VARIANT"
+	printf 'kernel_source=%s\n' \
+		"$([ "$KERNEL_VARIANT" = cattail ] && echo stock-V12.5.6.0.RCTINXM || echo tree-prebuilt-Image.gz)"
+	printf 'image=%s\n' "$(basename "$DEST")"
+	printf 'image_bytes=%s\n' "$(wc -c < "$DEST" | tr -d ' ')"
+	printf 'image_sha256=%s\n' "$IMAGE_SHA"
+	printf 'commit=%s\n' "$COMMIT"
+	printf 'repository=%s\n' "${GITHUB_REPOSITORY:-unknown}"
+	printf 'run=%s\n' "${RUN_URL:-local}"
+	printf 'built_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$MANIFEST"
+
 log "Done"
 printf 'image:    %s\n' "$DEST"
 printf 'size:     %s\n' "$(du -h "$DEST" | cut -f1)"
-printf 'sha256:   %s\n' "$(sha256sum "$DEST" | cut -d' ' -f1)"
+printf 'sha256:   %s\n' "$IMAGE_SHA"
+printf 'manifest: %s\n' "$MANIFEST"
 printf '\nFlash with:\n  fastboot flash recovery %s\n' "$(basename "$DEST")"

@@ -218,6 +218,26 @@ expect_ok "stubbed TWRP build" \
 expect_file "TWRP image named after branch/device/kernel" \
 	"$twrp_out/TWRP-twrp-11-cattail-garden-kernel-*.img"
 
+# The manifest rides along with the image: it must name the build inputs and
+# carry a digest that actually matches the .img.
+twrp_img="$(echo "$twrp_out"/TWRP-twrp-11-cattail-garden-kernel-*.img)"
+twrp_manifest="$(echo "$twrp_out"/TWRP-twrp-11-cattail-garden-kernel-*-manifest.txt)"
+if [ -f "$twrp_manifest" ] \
+	&& grep -qx 'recovery=twrp' "$twrp_manifest" \
+	&& grep -qx 'kernel_variant=garden' "$twrp_manifest" \
+	&& grep -qx 'manifest_branch=twrp-11' "$twrp_manifest"; then
+	ok "TWRP manifest records recovery, manifest branch and kernel"
+else
+	bad "TWRP manifest missing or incomplete: $twrp_manifest"
+fi
+if [ -f "$twrp_manifest" ] \
+	&& [ "$(sed -n 's/^image_sha256=//p' "$twrp_manifest")" \
+		= "$(sha256sum "$twrp_img" | cut -d' ' -f1)" ]; then
+	ok "TWRP manifest sha256 matches the image"
+else
+	bad "TWRP manifest sha256 does not match the image: $twrp_manifest"
+fi
+
 # --------------------------------------------------------------- OrangeFox run
 fox_src="$TMP/fox-src"
 fox_out="$TMP/artifacts-fox"
@@ -263,6 +283,17 @@ if [ -f "$fox_src/device/xiaomi/garden/prebuilt/kernel" ]; then
 	ok "stock kernel installed into the tree"
 else
 	bad "stock kernel was not installed into the tree"
+fi
+
+# Each kernel leg writes its own manifest, named after its own image.
+fox_manifest="$(echo "$fox_out"/OrangeFox-R12.0-Beta-garden-cattailkernel-*-manifest.txt)"
+if [ -f "$fox_manifest" ] \
+	&& grep -qx 'kernel_source=stock-V12.5.6.0.RCTINXM' "$fox_manifest" \
+	&& grep -qx 'kernel_variant=cattail' "$fox_manifest" \
+	&& grep -qx "^image=OrangeFox-R12.0-Beta-garden-cattailkernel-.*\.img$" "$fox_manifest"; then
+	ok "OrangeFox manifest names the stock kernel source and its own image"
+else
+	bad "OrangeFox manifest did not record the stock kernel build: $fox_manifest"
 fi
 
 # ---------------------------------------------------------------------- verdict

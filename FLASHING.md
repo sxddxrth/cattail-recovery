@@ -103,6 +103,12 @@ If you downloaded from the Releases page, the release also ships
 sha256sum -c SHA256SUMS.txt
 ```
 
+Every image also comes with `<image>-manifest.txt`, a `key=value` record of the
+kernel variant, the OrangeFox/TWRP branch, the commit and the digest it was
+built from. Keep it next to the `.img` — when two images with similar names are
+sitting in your Downloads folder, the manifest is how you tell which is which
+and whether the one you are holding is the one you meant to flash.
+
 A recovery image for this device is roughly 30–64 MB and starts with the bytes
 `ANDROID!`. Quick sanity check on Linux/macOS:
 
