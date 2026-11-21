@@ -391,7 +391,12 @@ jobs:
           path: images
           merge-multiple: true
 
-      - name: Check the images and write checksums
+      - name: Verify images and manifests
+        # Nothing gets published unless every .img can be traced: each one needs
+        # its own manifest, the manifest must describe that exact file, the
+        # digest must still match, and no two manifests may claim the same image
+        # or the same recovery/kernel leg. This is what stops a release from
+        # mixing the garden and cattail images up.
         run: |
           set -euo pipefail
           ls -l images
@@ -399,6 +404,72 @@ jobs:
             echo "::error::the build succeeded but no .img file was downloaded"
             exit 1
           fi
+
+          field() { grep -m1 "^$1=" "$2" 2>/dev/null | cut -d= -f2- || true; }
+
+          fail=0
+          declare -A seen_image=()
+          declare -A seen_leg=()
+          for img in images/*.img; do
+            name="$(basename "$img")"
+            manifest="${img%.img}-manifest.txt"
+            mname="$(basename "$manifest")"
+
+            if [ ! -f "$manifest" ]; then
+              echo "::error::$name has no $mname, so nobody can tell which kernel, branch or commit produced it"
+              fail=1
+              continue
+            fi
+
+            declared="$(field image "$manifest")"
+            variant="$(field kernel_variant "$manifest")"
+            recovery="$(field recovery "$manifest")"
+            digest="$(field image_sha256 "$manifest")"
+
+            if [ -z "$declared" ] || [ -z "$variant" ] || [ -z "$recovery" ] || [ -z "$digest" ]; then
+              echo "::error::$mname is missing one of image/kernel_variant/recovery/image_sha256"
+              fail=1
+              continue
+            fi
+            if [ "$declared" != "$name" ]; then
+              echo "::error::$mname describes '$declared', not '$name' -- the image and its manifest are mismatched"
+              fail=1
+            fi
+            case "$name" in
+              *"$variant"*) ;;
+              *) echo "::error::$name does not contain its manifest's kernel variant '$variant'"
+                 fail=1 ;;
+            esac
+            actual="$(sha256sum "$img" | cut -d' ' -f1)"
+            if [ "$digest" != "$actual" ]; then
+              echo "::error::$name does not match the digest recorded in $mname"
+              fail=1
+            fi
+
+            if [ -n "${seen_image[$declared]:-}" ]; then
+              echo "::error::$mname and ${seen_image[$declared]} both describe '$declared' -- one of them belongs to another image"
+              fail=1
+            fi
+            seen_image["$declared"]="$mname"
+
+            leg="$recovery/$variant"
+            if [ -n "${seen_leg[$leg]:-}" ]; then
+              echo "::error::$mname and ${seen_leg[$leg]} are both $leg images -- the kernel legs got mixed up"
+              fail=1
+            fi
+            seen_leg["$leg"]="$mname"
+
+            echo "ok: $name <- $mname ($leg)"
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::refusing to publish this release; fix the images above and re-run"
+            exit 1
+          fi
+
+      - name: Write checksums
+        run: |
+          set -euo pipefail
           # Ship the digests with the release so a download can be checked
           # without digging the sha256 out of the run log.
           cd images

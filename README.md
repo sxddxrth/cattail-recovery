@@ -91,6 +91,12 @@ also carries `SHA256SUMS.txt`, so a download can be verified with
 plus the `-manifest.txt` file for each image. Manifest names carry the image
 name, so two kernel legs never overwrite each other's manifest.
 
+The release step is a gate, not a copy: it refuses to publish if an `.img` has
+no manifest, if a manifest names a different image than the one next to it, if
+the recorded digest no longer matches, or if two manifests claim the same image
+or the same recovery/kernel leg. A mixed-up release cannot be produced by
+accident.
+
 Artifacts are zips containing the `.img` and are kept for 30 days; each run's
 log prints the image `sha256:` so you can verify your download. On failure the
 run uploads `orangefox-build-log-failure` / `twrp-build-log-failure` with
