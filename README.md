@@ -97,6 +97,16 @@ the recorded digest no longer matches, or if two manifests claim the same image
 or the same recovery/kernel leg. A mixed-up release cannot be produced by
 accident.
 
+The gate is itself tested: `scripts/check-release-gate.sh` lifts that step out
+of the workflow and runs it against fabricated artifact folders — one healthy
+set that must be published, and one broken set per rule that must be refused —
+in the `Validate build scripts` job, so a weakened check fails in seconds
+instead of at publish time.
+
+Before trusting an image on the phone, [FLASHING.md](FLASHING.md#7-first-boot-in-recovery)
+has a first-boot checklist: manifest and digest, boot, touch, adb, storage size,
+`/data` decryption.
+
 Artifacts are zips containing the `.img` and are kept for 30 days; each run's
 log prints the image `sha256:` so you can verify your download. On failure the
 run uploads `orangefox-build-log-failure` / `twrp-build-log-failure` with
@@ -165,6 +175,7 @@ inside its tools checkout — the script handles all three.
 .github/workflows/build-twrp.yml   CI: OrangeFox (primary) + TWRP (experimental)
 scripts/check-device-tree.sh       fast device-tree / product preflight, run first in CI
 scripts/selftest.sh                stub-driven test of both build scripts
+scripts/check-release-gate.sh      runs the workflow's release gate against fake artifacts
 scripts/build-orangefox.sh         OrangeFox sync + build + collect
 scripts/build-twrp.sh              TWRP repo-sync + build + collect
 device/xiaomi/garden/              vendored unified MT6765 device tree

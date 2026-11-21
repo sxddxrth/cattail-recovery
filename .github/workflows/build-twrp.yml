@@ -92,6 +92,17 @@ jobs:
           chmod +x scripts/selftest.sh
           scripts/selftest.sh
 
+      - name: Check the release gate
+        # The release job refuses to publish an image with no manifest, a
+        # manifest that names another file, a digest that drifted, or a
+        # duplicated kernel leg. Those guards live in the workflow, so this
+        # runs the real step body against fabricated artifact folders instead
+        # of discovering a broken gate when the release is due.
+        run: |
+          set -euo pipefail
+          chmod +x scripts/check-release-gate.sh
+          scripts/check-release-gate.sh
+
   orangefox:
     name: Build OrangeFox for cattail -- ${{ matrix.kernel_variant }} kernel (primary)
     needs: selftest

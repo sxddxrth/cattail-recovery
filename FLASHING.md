@@ -23,7 +23,7 @@ can hard-brick the phone.
 4. [Back up the current recovery (optional, phone already rooted)](#4-back-up-the-current-recovery)
 5. [Flash OrangeFox — the primary image](#5-flash-orangefox--the-primary-image)
 6. [Flash the experimental TWRP image](#6-flash-the-experimental-twrp-image)
-7. [First boot in recovery: decryption and /data](#7-first-boot-in-recovery)
+7. [First boot in recovery: manifest, boot, touch, /data](#7-first-boot-in-recovery)
 8. [Troubleshooting a flash that "does not work"](#8-troubleshooting-a-flash-that-does-not-work)
 9. [Unbrick: fastboot still works](#9-unbrick-fastboot-still-works)
 10. [Unbrick: no fastboot, black screen (BROM/preloader)](#10-unbrick-no-fastboot-black-screen)
@@ -255,21 +255,62 @@ each `fastboot flash recovery` replaces the other.
 
 ## 7. First boot in recovery
 
-- **Decryption.** The device is Android 10 with file-based encryption. OrangeFox
-  12.1 is not the branch this Android version shipped with, so `/data` may not
-  decrypt. If it asks for a password, enter the lock-screen PIN/pattern. If it
-  refuses the password or shows 0 MB of internal storage, the data partition
-  cannot be read — a **Format Data** (wipes everything, including internal
-  storage) fixes the mount and is required before flashing zips that touch
-  `/data`.
-- **Mounting `system`.** Android 10 dynamic partitions mean `system`, `vendor`
-  and `product` live inside `super`; mount them from the recovery's Mount menu
-  rather than expecting separate partitions.
-- **Never flash a ROM for a different codename.** Anything labelled
-  `lancelot`, `garden`-only stock packages or Redmi 9 (global) builds is not
-  this phone.
-- **Back up before you change anything:** recovery → Backup → boot, recovery,
-  and (if it mounts) data.
+### Match the file to its manifest first
+
+Every image ships next to a `<image>-manifest.txt` that records the kernel
+variant, branch, commit and the image's own SHA-256. Check them before flashing:
+
+```bash
+cat OrangeFox-R12.0-Beta-garden-cattailkernel-20260101-manifest.txt
+#   recovery=orangefox
+#   kernel_variant=cattail
+#   manifest_branch=12.1
+#   image=OrangeFox-R12.0-Beta-garden-cattailkernel-20260101.img
+#   image_sha256=...
+
+# the digest you compute must equal the image_sha256= line
+sha256sum OrangeFox-R12.0-Beta-garden-cattailkernel-20260101.img
+```
+
+The `kernel_variant=` line is the one that matters when you downloaded both
+legs: it tells you which image you are about to flash, and the digest tells you
+the file arrived intact. `SHA256SUMS.txt` from a release covers both images and
+both manifests at once (`sha256sum -c SHA256SUMS.txt`).
+
+### What a working boot looks like
+
+Work down this list in order. The first three decide whether the image suits
+this phone; the rest is what you need settled before trusting it with a flash.
+
+- [ ] **It boots.** The OrangeFox (or TWRP) splash appears within about ten
+      seconds and the menu is drawn at the right size — 720×1600, portrait, not
+      a third of the screen. A black screen, a boot loop back into MIUI, or the
+      old recovery still appearing means this kernel leg is wrong for your
+      unit: flash the other leg from the same run before concluding anything
+      about the recovery itself.
+- [ ] **Touch works.** If the menu draws but taps do nothing, the touch firmware
+      blob in the device tree does not match your panel revision — use the
+      buttons/volume keys to navigate, and report which build you flashed.
+- [ ] **`adb devices` shows it.** With USB debugging available in recovery the
+      phone should appear as `recovery`, and `adb shell` should give you a root
+      prompt inside the recovery.
+- [ ] **Internal storage shows the real size.** Roughly 110 GB on the 64 GB
+      variant, not `0 MB`. Zero means `/data` did not mount — see below.
+- [ ] **Decryption.** The device is Android 10 with file-based encryption.
+      OrangeFox 12.1 is not the branch this Android version shipped with, so
+      `/data` may not decrypt. If it asks for a password, enter the lock-screen
+      PIN/pattern. If it refuses the password or shows 0 MB, the data partition
+      cannot be read — a **Format Data** (wipes everything, including internal
+      storage) fixes the mount and is required before flashing zips that touch
+      `/data`.
+- [ ] **Mounting `system`.** Android 10 dynamic partitions mean `system`,
+      `vendor` and `product` live inside `super`; mount them from the recovery's
+      Mount menu rather than expecting separate partitions.
+- [ ] **Back up before you change anything:** recovery → Backup → boot,
+      recovery, and (if it mounts) data.
+- [ ] **Never flash a ROM for a different codename.** Anything labelled
+      `lancelot`, `garden`-only stock packages or Redmi 9 (global) builds is not
+      this phone.
 
 ---
 
