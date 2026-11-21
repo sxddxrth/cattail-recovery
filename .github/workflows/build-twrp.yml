@@ -211,10 +211,28 @@ jobs:
 
       - name: Enable ccache
         run: |
-          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
-          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_EXEC=$(command -v ccache)" >> "$GITHUB_ENV"
-          ccache -M 5G
+          set -euo pipefail
+          # $HOME/.ccache is a read-only mount on these runners --
+          #   ccache: error: Failed to create directory
+          #   /home/runner/.ccache/tmp: Read-only file system
+          # -- which killed the first run that got as far as compiling, even
+          # though the rest of $HOME is writable. Keep the cache in the workspace
+          # and prove the directory is writable before the multi-GB sync starts.
+          CACHE_DIR="${{ github.workspace }}/.ccache"
+          mkdir -p "$CACHE_DIR/tmp"
+          if ! touch "$CACHE_DIR/tmp/.write-test" 2>/dev/null; then
+            echo "::error::ccache directory $CACHE_DIR is not writable"
+            exit 1
+          fi
+          rm -f "$CACHE_DIR/tmp/.write-test"
+          {
+            echo "USE_CCACHE=1"
+            echo "CCACHE_DIR=$CACHE_DIR"
+            echo "CCACHE_TEMPDIR=$CACHE_DIR/tmp"
+            echo "CCACHE_MAXSIZE=5G"
+            echo "CCACHE_EXEC=$(command -v ccache)"
+          } >> "$GITHUB_ENV"
+          CCACHE_DIR="$CACHE_DIR" CCACHE_TEMPDIR="$CACHE_DIR/tmp" ccache -M 5G
           df -h /
 
       - name: Build OrangeFox image
@@ -328,10 +346,28 @@ jobs:
 
       - name: Enable ccache
         run: |
-          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
-          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_EXEC=$(command -v ccache)" >> "$GITHUB_ENV"
-          ccache -M 5G
+          set -euo pipefail
+          # $HOME/.ccache is a read-only mount on these runners --
+          #   ccache: error: Failed to create directory
+          #   /home/runner/.ccache/tmp: Read-only file system
+          # -- which killed the first run that got as far as compiling, even
+          # though the rest of $HOME is writable. Keep the cache in the workspace
+          # and prove the directory is writable before the multi-GB sync starts.
+          CACHE_DIR="${{ github.workspace }}/.ccache"
+          mkdir -p "$CACHE_DIR/tmp"
+          if ! touch "$CACHE_DIR/tmp/.write-test" 2>/dev/null; then
+            echo "::error::ccache directory $CACHE_DIR is not writable"
+            exit 1
+          fi
+          rm -f "$CACHE_DIR/tmp/.write-test"
+          {
+            echo "USE_CCACHE=1"
+            echo "CCACHE_DIR=$CACHE_DIR"
+            echo "CCACHE_TEMPDIR=$CACHE_DIR/tmp"
+            echo "CCACHE_MAXSIZE=5G"
+            echo "CCACHE_EXEC=$(command -v ccache)"
+          } >> "$GITHUB_ENV"
+          CCACHE_DIR="$CACHE_DIR" CCACHE_TEMPDIR="$CACHE_DIR/tmp" ccache -M 5G
           df -h /
 
       - name: Build recovery image

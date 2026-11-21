@@ -239,6 +239,14 @@ runner being recycled.
 The entries below are the failures this pipeline is most likely to hit, in
 rough order of likelihood.
 
+### `ccache: error: Failed to create directory /home/runner/.ccache/tmp`
+
+`$HOME/.ccache` is a read-only mount on the runner, even though the rest of
+`$HOME` is writable, so the first run that reached compilation died here. The
+ccache step now keeps the cache in `${{ github.workspace }}/.ccache`, sets
+`CCACHE_TEMPDIR` next to `CCACHE_DIR`, and probes the directory before the
+multi-GB sync — so a repeat failure shows up in seconds, not minutes.
+
 ### `No space left on device` (OrangeFox job)
 
 **Where:** during the `orangefox_sync.sh` sync, during the compile, or when

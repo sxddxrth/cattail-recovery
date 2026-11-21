@@ -3,6 +3,7 @@
 /fox/
 /fox_sync/
 /artifacts/
+/.ccache/
 build.log
 twrp/out/
 fox/out/
