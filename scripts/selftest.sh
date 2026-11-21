@@ -22,6 +22,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+# Exported because the stub sync scripts expand $TMP when they run, not when
+# they are written.
+export TMP
 trap 'rm -rf "$TMP"' EXIT
 
 passes=0
@@ -132,17 +135,32 @@ section "Stub builds"
 stubbin="$TMP/bin"
 mkdir -p "$stubbin"
 
-# Fake repo launcher: init creates .repo, sync drops in a build/envsetup.sh
-# that defines lunch(). Nothing is downloaded.
-cat > "$stubbin/repo" <<'STUB'
+# A stand-in for AOSP's build/envsetup.sh, written to be just as hostile as the
+# real one: it dereferences TOP, which only the caller can arrange, and it is not
+# nounset-safe. The first real CI run died here ("TOP: unbound variable", then
+# "/device/xiaomi/garden/vendorsetup.sh: No such file"), so both build scripts
+# must export TOP and lift `set -u` while sourcing this.
+cat > "$TMP/hostile-envsetup.sh" <<'STUB'
+TOP_CHECK="${TOP:?envsetup.sh needs TOP}"
+lunch() { echo "stub lunch: $*"; }
+STUB
+
+# The stub only tests anything if it really breaks without a TOP.
+expect_fail "hostile envsetup.sh rejects a missing TOP" \
+	"envsetup.sh needs TOP" \
+	bash -c 'set -euo pipefail; . "$1"' _ "$TMP/hostile-envsetup.sh"
+
+# Fake repo launcher: init creates .repo, sync copies in the hostile
+# build/envsetup.sh above. Nothing is downloaded.
+cat > "$stubbin/repo" <<STUB
 #!/usr/bin/env bash
 set -euo pipefail
-case "${1:-}" in
+case "\${1:-}" in
 	--version) echo "repo stub" ;;
 	init) mkdir -p .repo ;;
 	sync)
 		mkdir -p build
-		printf '%s\n' 'lunch() { echo "stub lunch: $*"; }' > build/envsetup.sh
+		cp "$TMP/hostile-envsetup.sh" build/envsetup.sh
 		;;
 	*) : ;;
 esac
@@ -188,7 +206,7 @@ case "$branch" in
 	*) echo "stub: unsupported branch $branch" >&2; exit 1 ;;
 esac
 mkdir -p "$path/.repo" "$path/bootable/recovery" "$path/vendor/recovery/.git" "$path/build"
-printf '%s\n' 'lunch() { echo "stub lunch: $*"; }' > "$path/build/envsetup.sh"
+cp "$TMP/hostile-envsetup.sh" "$path/build/envsetup.sh"
 echo "stub: synced $branch into $path"
 STUB
 git -C "$fox_tools" init -q -b master

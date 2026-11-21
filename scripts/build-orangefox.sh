@@ -141,9 +141,17 @@ export LC_ALL=C
 export TZ=UTC
 export FOX_BUILD_DEVICE="$TREE_TARGET"
 
+# AOSP's build/envsetup.sh is not nounset-safe: it reads $TOP before working
+# it out, so sourcing it under `set -u` aborts, TOP stays empty, and it looks for
+# the device tree under /device/... instead of the build root. Hand it a TOP and
+# relax nounset while it and lunch() run, then restore it so OUR unset-variable
+# mistakes still fail loudly.
+export TOP="$(pwd)"
+set +u
 # shellcheck disable=SC1091
 . build/envsetup.sh
 lunch "${PRODUCT}-eng"
+set -u
 mka adbd recoveryimage -j"$JOBS"
 
 # --------------------------------------------------------------------- collect
